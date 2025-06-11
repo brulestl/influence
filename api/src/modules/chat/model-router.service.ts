@@ -2,30 +2,68 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChatRequestDto, ChatActionType } from './dto/chat.dto';
 import { Tier } from '../auth/auth.service';
+import OpenAI from 'openai';
 
 export interface ModelResponse {
-  message: string;
+  reply: string;
+  context_used: string[];
+  cost_in_tokens: number;
   modelUsed: string;
-  tokensUsed?: number;
   processingTime?: number;
 }
 
 @Injectable()
 export class ModelRouterService {
-  constructor(private readonly configService: ConfigService) {}
+  private openai: OpenAI;
+
+  constructor(private readonly configService: ConfigService) {
+    this.openai = new OpenAI({
+      apiKey: this.configService.get<string>('OPENAI_API_KEY'),
+    });
+  }
 
   async routeToModel(
     request: ChatRequestDto,
     userTier: Tier,
+    contextData?: string[]
   ): Promise<ModelResponse> {
+    const startTime = Date.now();
+    
     // Determine which model to use based on tier
     const modelConfig = this.getModelConfig(userTier);
     
-    // For MVP, we'll return mock responses
-    // In production, this would call actual AI models
-    const response = await this.generateMockResponse(request, modelConfig);
+    // Check tier quotas before processing
+    await this.checkTierQuotas(userTier, request);
     
-    return response;
+    // Build the conversation context
+    const messages = this.buildConversationMessages(request, modelConfig, contextData);
+    
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: modelConfig.openaiModel,
+        messages,
+        max_tokens: modelConfig.maxTokens,
+        temperature: modelConfig.temperature,
+        presence_penalty: 0.1,
+        frequency_penalty: 0.1,
+      });
+
+      const processingTime = Date.now() - startTime;
+      const tokensUsed = completion.usage?.total_tokens || 0;
+      
+      return {
+        reply: completion.choices[0]?.message?.content || 'I apologize, but I was unable to generate a response. Please try again.',
+        context_used: contextData || [],
+        cost_in_tokens: tokensUsed,
+        modelUsed: modelConfig.modelName,
+        processingTime,
+      };
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+      
+      // Fallback to tier-appropriate mock response on API failure
+      return this.generateFallbackResponse(request, modelConfig, contextData);
+    }
   }
 
   private getModelConfig(tier: Tier) {
@@ -33,48 +71,142 @@ export class ModelRouterService {
       case 'power':
         return {
           modelName: 'power-strategist-gpt',
+          openaiModel: 'gpt-4-turbo-preview',
           maxTokens: 4000,
           temperature: 0.7,
           features: ['deep_context', 'voice_input', 'personalization'],
+          systemPrompt: 'You are a senior executive coach specializing in corporate politics and workplace influence. Provide sophisticated, strategic advice with deep contextual understanding. Include specific tactics, timing considerations, and risk assessments.',
         };
       case 'essential':
         return {
           modelName: 'essential-coach-gpt',
+          openaiModel: 'gpt-3.5-turbo',
           maxTokens: 2000,
           temperature: 0.6,
           features: ['basic_coaching'],
+          systemPrompt: 'You are a professional workplace coach. Provide practical, actionable advice for corporate situations. Focus on clear strategies and professional communication.',
         };
       case 'guest':
       default:
         return {
           modelName: 'guest-advisor',
+          openaiModel: 'gpt-3.5-turbo',
           maxTokens: 1000,
           temperature: 0.5,
           features: ['limited_advice'],
+          systemPrompt: 'You are a workplace advisor. Provide helpful but general advice for professional situations. Keep responses concise and focused.',
         };
     }
   }
 
-  private async generateMockResponse(
+  private async checkTierQuotas(tier: Tier, request: ChatRequestDto): Promise<void> {
+    // Power tier has unlimited access
+    if (tier === 'power') {
+      return;
+    }
+
+    // For guest and essential tiers, quota checking is handled by the chat service
+    // This is a placeholder for additional tier-specific validations
+    const estimatedTokens = this.estimateTokenUsage(request.message);
+    const modelConfig = this.getModelConfig(tier);
+    
+    if (estimatedTokens > modelConfig.maxTokens) {
+      throw new Error(`Request too large for ${tier} tier. Please shorten your message or upgrade to Power Strategist.`);
+    }
+  }
+
+  private estimateTokenUsage(text: string): number {
+    // Rough estimation: ~4 characters per token
+    return Math.ceil(text.length / 4);
+  }
+
+  private buildConversationMessages(
     request: ChatRequestDto,
     modelConfig: any,
-  ): Promise<ModelResponse> {
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+    contextData?: string[]
+  ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      {
+        role: 'system',
+        content: modelConfig.systemPrompt,
+      },
+    ];
 
+    // Add context if available (for power tier)
+    if (contextData && contextData.length > 0 && modelConfig.features.includes('deep_context')) {
+      const contextPrompt = `Previous conversation context:\n${contextData.join('\n\n')}`;
+      messages.push({
+        role: 'system',
+        content: contextPrompt,
+      });
+    }
+
+    // Add conversation history if provided
+    if (request.context && request.context.length > 0) {
+      request.context.forEach(msg => {
+        messages.push({
+          role: msg.role,
+          content: msg.content,
+        });
+      });
+    }
+
+    // Add action type context if specified
+    if (request.actionType) {
+      const actionContext = this.getActionTypeContext(request.actionType);
+      messages.push({
+        role: 'system',
+        content: actionContext,
+      });
+    }
+
+    // Add the current user message
+    messages.push({
+      role: 'user',
+      content: request.message,
+    });
+
+    return messages;
+  }
+
+  private getActionTypeContext(actionType: ChatActionType): string {
+    switch (actionType) {
+      case ChatActionType.EVALUATE_SCENARIO:
+        return 'Focus on analyzing the situation, identifying key stakeholders, risks, and opportunities. Provide a structured evaluation.';
+      case ChatActionType.PLAN_STRATEGY:
+        return 'Develop a comprehensive strategic plan with specific steps, timeline, and contingencies.';
+      case ChatActionType.ANALYZE_STAKEHOLDERS:
+        return 'Provide detailed stakeholder mapping including influence levels, interests, and recommended engagement approaches.';
+      case ChatActionType.SUMMARIZE_POLICY:
+        return 'Break down the policy into key components, implications, and actionable insights.';
+      case ChatActionType.BRAINSTORM_INSIGHTS:
+        return 'Generate creative perspectives and innovative approaches to the challenge.';
+      case ChatActionType.DRAFT_EMAIL:
+        return 'Create professional, persuasive email content with clear structure and appropriate tone.';
+      default:
+        return 'Provide comprehensive workplace coaching advice tailored to the specific situation.';
+    }
+  }
+
+  private async generateFallbackResponse(
+    request: ChatRequestDto,
+    modelConfig: any,
+    contextData?: string[]
+  ): Promise<ModelResponse> {
+    // Fallback to mock responses when OpenAI API is unavailable
     const responses = this.getMockResponsesByAction(request.actionType);
     const randomResponse = responses[Math.floor(Math.random() * responses.length)];
     
-    // Customize response based on tier
     let enhancedResponse = randomResponse;
     if (modelConfig.modelName === 'power-strategist-gpt') {
       enhancedResponse = this.enhanceForPowerTier(randomResponse);
     }
 
     return {
-      message: enhancedResponse,
-      modelUsed: modelConfig.modelName,
-      tokensUsed: Math.floor(Math.random() * modelConfig.maxTokens * 0.3) + 50,
+      reply: enhancedResponse,
+      context_used: contextData || [],
+      cost_in_tokens: Math.floor(Math.random() * modelConfig.maxTokens * 0.3) + 50,
+      modelUsed: `${modelConfig.modelName} (fallback)`,
       processingTime: Math.floor(Math.random() * 2000) + 500,
     };
   }

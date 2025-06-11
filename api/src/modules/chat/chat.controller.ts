@@ -15,9 +15,12 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
+import { ConflictAnalysisService } from './conflict-analysis.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { RateLimitingGuard } from '../rate-limiting/rate-limiting.guard';
 import { AuthUser } from '../auth/auth.service';
 import { ChatRequestDto, ChatResponseDto } from './dto/chat.dto';
+import { ConflictAnalysisRequestDto, ConflictAnalysisResponseDto } from './dto/conflict-analysis.dto';
 
 interface AuthenticatedRequest extends Request {
   user: AuthUser;
@@ -25,10 +28,13 @@ interface AuthenticatedRequest extends Request {
 
 @ApiTags('chat')
 @Controller('chat')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RateLimitingGuard)
 @ApiBearerAuth()
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly conflictAnalysisService: ConflictAnalysisService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -60,20 +66,7 @@ export class ChatController {
     try {
       const user = req.user;
       
-      // Check if user can make queries (rate limiting)
-      const canQuery = await this.chatService.canUserMakeQuery(user);
-      if (!canQuery) {
-        throw new HttpException(
-          {
-            message: 'Daily query limit exceeded. Upgrade to Power Strategist for unlimited queries.',
-            code: 'QUERY_LIMIT_EXCEEDED',
-            upgradeUrl: '/upgrade',
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-
-      // Process the chat request
+      // Process the chat request (rate limiting is handled by guard)
       const response = await this.chatService.processChat(chatRequest, user);
       
       return response;
@@ -85,6 +78,53 @@ export class ChatController {
       console.error('Chat processing error:', error);
       throw new HttpException(
         'An error occurred while processing your request',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('conflict-analysis')
+  @ApiOperation({
+    summary: 'Analyze workplace conflicts with AI-powered insights',
+    description: 'Provides detailed conflict analysis including root cause, stakeholder mapping, and resolution strategies',
+  })
+  @ApiBody({ type: ConflictAnalysisRequestDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Conflict analysis completed successfully',
+    type: ConflictAnalysisResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - invalid or missing token',
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Rate limit exceeded - upgrade to Power tier for unlimited analyses',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+  })
+  async analyzeConflict(
+    @Body() analysisRequest: ConflictAnalysisRequestDto,
+    @Request() req: AuthenticatedRequest,
+  ): Promise<ConflictAnalysisResponseDto> {
+    try {
+      const user = req.user;
+      
+      // Process the conflict analysis request (rate limiting is handled by guard)
+      const response = await this.conflictAnalysisService.analyzeConflict(analysisRequest, user);
+      
+      return response;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      
+      console.error('Conflict analysis error:', error);
+      throw new HttpException(
+        'An error occurred while processing your conflict analysis request',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

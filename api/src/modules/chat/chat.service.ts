@@ -54,12 +54,13 @@ export class ChatService {
       const modelResponse = await this.modelRouter.routeToModel(
         enhancedRequest,
         user.tier,
+        ragContext.contextSources
       );
 
       // Store the interaction for future RAG context
       await this.ragService.storeInteraction(
         request,
-        modelResponse.message,
+        modelResponse.reply,
         user,
         sessionId,
       );
@@ -67,12 +68,12 @@ export class ChatService {
       // Construct response
       const response: ChatResponseDto = {
         id: responseId,
-        message: modelResponse.message,
+        message: modelResponse.reply,
         timestamp: new Date().toISOString(),
         sessionId,
         model: modelResponse.modelUsed,
         usage: {
-          tokensUsed: modelResponse.tokensUsed || 0,
+          tokensUsed: modelResponse.cost_in_tokens,
           remainingQueries: user.tier === 'power' ? undefined : this.getRemainingQueries(user),
         },
       };
@@ -82,10 +83,11 @@ export class ChatService {
         requestId: responseId,
         actionType: request.actionType,
         modelUsed: modelResponse.modelUsed,
-        tokensUsed: modelResponse.tokensUsed,
+        tokensUsed: modelResponse.cost_in_tokens,
         ragContext: {
           contextSources: ragContext.contextSources,
           relevanceScore: ragContext.relevanceScore,
+          contextUsed: modelResponse.context_used,
         },
       });
 

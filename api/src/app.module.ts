@@ -5,6 +5,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { EmbeddingsModule } from './modules/embeddings/embeddings.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { RAGModule } from './modules/rag/rag.module';
+import { RateLimitingModule } from './modules/rate-limiting/rate-limiting.module';
+import { StripeModule } from './modules/stripe/stripe.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -18,6 +20,8 @@ import { AppService } from './app.service';
     EmbeddingsModule,
     MemoryModule,
     RAGModule,
+    RateLimitingModule,
+    StripeModule,
     ChatModule,
   ],
   controllers: [AppController],
