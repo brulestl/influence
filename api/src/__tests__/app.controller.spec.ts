@@ -4,7 +4,7 @@ import { AppService } from '../app.service';
 
 describe('AppController', () => {
   let appController: AppController;
-  let appService: AppService;
+  let _appService: AppService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -13,12 +13,12 @@ describe('AppController', () => {
     }).compile();
 
     appController = module.get<AppController>(AppController);
-    appService = module.get<AppService>(AppService);
+    _appService = module.get<AppService>(AppService);
   });
 
   describe('getHealth', () => {
     it('should return health status', () => {
-      const result = appController.getHealth();
+      const result = appController.getHealth() as any;
       
       expect(result).toHaveProperty('status', 'ok');
       expect(result).toHaveProperty('service', 'Corporate Influence Coach API');
@@ -29,7 +29,7 @@ describe('AppController', () => {
 
   describe('getRoot', () => {
     it('should return API information', () => {
-      const result = appController.getRoot();
+      const result = appController.getRoot() as any;
       
       expect(result).toHaveProperty('name', 'Corporate Influence Coach API');
       expect(result).toHaveProperty('version', '1.0.0');

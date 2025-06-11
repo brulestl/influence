@@ -45,7 +45,7 @@ export class MemoryService {
         tokenCount: embeddingResponse.tokens,
       };
 
-      const { data, error } = await this.supabase
+      const { data: _data, error } = await this.supabase
         .from('conversation_messages')
         .insert([{
           id: messageWithId.id,
@@ -137,17 +137,17 @@ export class MemoryService {
       });
 
       // Build the query
-      let query = this.supabase
+      let _query = this.supabase
         .from('conversation_messages')
         .select('*')
         .eq('user_id', request.userId);
 
       if (request.excludeCurrentSession && request.sessionId) {
-        query = query.neq('session_id', request.sessionId);
+        _query = _query.neq('session_id', request.sessionId);
       }
 
       // Use RPC function for vector similarity search
-      const { data, error } = await this.supabase.rpc('search_similar_messages', {
+      const { data: _data, error } = await this.supabase.rpc('search_similar_messages', {
         query_embedding: queryEmbedding.embedding.values,
         user_id: request.userId,
         similarity_threshold: request.threshold || 0.7,
@@ -160,7 +160,7 @@ export class MemoryService {
         throw new Error(`Similarity search failed: ${error.message}`);
       }
 
-      return (data || []).map((row: any) => ({
+      return (_data || []).map((row: any) => ({
         message: this.mapRowToMessage(row),
         similarity: row.similarity || 0,
         relevanceScore: this.calculateRelevanceScore(row.similarity || 0, row.timestamp),
@@ -182,7 +182,7 @@ export class MemoryService {
       isActive: true,
     };
 
-    const { data, error } = await this.supabase
+    const { data: _data, error } = await this.supabase
       .from('conversation_sessions')
       .insert([{
         id: session.id,

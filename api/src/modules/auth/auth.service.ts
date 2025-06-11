@@ -39,8 +39,8 @@ export class AuthService {
         email: user.email || '',
         tier,
       };
-    } catch (error) {
-      throw new UnauthorizedException('Token validation failed');
+    } catch (_error) {
+      throw new UnauthorizedException('Invalid credentials');
     }
   }
 
